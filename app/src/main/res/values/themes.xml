@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.RemoConnect" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/remo_window_background</item>
+        <item name="android:colorAccent">@color/remo_accent</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="colorPrimary">@color/remo_primary</item>
+        <item name="colorPrimaryDark">@color/remo_primary_dark</item>
+        <item name="colorAccent">@color/remo_accent</item>
+        <item name="mediaRouteTheme">@style/Theme.RemoConnect.MediaRouter</item>
+    </style>
+
+    <style name="Theme.RemoConnect.MediaRouter" parent="Theme.MediaRouter">
+        <item name="colorPrimary">@color/remo_primary</item>
+        <item name="colorPrimaryDark">@color/remo_primary_dark</item>
+        <item name="colorAccent">@color/remo_accent</item>
+        <item name="mediaRouteButtonStyle">@style/Widget.RemoConnect.MediaRouteButton</item>
+    </style>
+
+    <style name="Widget.RemoConnect.MediaRouteButton" parent="Widget.MediaRouter.MediaRouteButton">
+        <item name="buttonTint">@color/white</item>
+    </style>
+</resources>

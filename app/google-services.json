@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "830774571412",
+    "project_id": "remoconnect-f0e7b",
+    "storage_bucket": "remoconnect-f0e7b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:830774571412:android:19858a42e553f6ae0b5f81",
+        "android_client_info": {
+          "package_name": "com.famage.remoconnect"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAgEugDrOCHIzIIyZyabcsvPvxcTsu1760"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

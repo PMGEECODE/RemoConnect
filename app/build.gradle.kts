@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.google.services)
@@ -18,8 +20,33 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePropFile = rootProject.file("keystore.properties")
+            if (keystorePropFile.exists()) {
+                val props = Properties().apply { load(keystorePropFile.inputStream()) }
+                storeFile = rootProject.file(props.getProperty("storeFile", "release.keystore"))
+                storePassword = props.getProperty("storePassword", "")
+                keyAlias = props.getProperty("keyAlias", "remoconnect")
+                keyPassword = props.getProperty("keyPassword", props.getProperty("storePassword", ""))
+            } else {
+                val releaseKeystore = rootProject.file("release.keystore")
+                if (releaseKeystore.exists()) {
+                    storeFile = releaseKeystore
+                    storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+                    keyAlias = System.getenv("KEY_ALIAS") ?: "remoconnect"
+                    keyPassword = System.getenv("KEY_PASSWORD") ?: storePassword
+                }
+            }
+        }
+    }
+
     buildTypes {
         release {
+            val relSigning = signingConfigs.getByName("release")
+            if (relSigning.storeFile?.exists() == true && !relSigning.storePassword.isNullOrEmpty()) {
+                signingConfig = relSigning
+            }
             optimization {
                 enable = false
             }

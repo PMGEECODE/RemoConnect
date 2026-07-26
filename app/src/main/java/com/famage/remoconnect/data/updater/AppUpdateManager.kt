@@ -17,15 +17,16 @@ import java.net.URL
 
 class AppUpdateManager(private val context: Context) {
 
-    // Default GitHub repo releases endpoint (can be overridden or customized)
-    private val defaultUpdateServerUrl = "https://api.github.com/repos/famage/RemoConnect/releases/latest"
+    // Default GitHub repo releases endpoint
+    private val defaultUpdateServerUrl = "https://api.github.com/repos/PMGEECODE/RemoConnect/releases/latest"
 
     /**
      * Checks if a new app version is available.
-     * Compares remote versionCode / versionName against current app versionCode.
+     * Compares remote versionCode / versionName against current app version.
      */
     suspend fun checkForUpdates(
         currentVersionCode: Int,
+        currentVersionName: String = "1.0.0",
         customUrl: String? = null
     ): UpdateInfo? = withContext(Dispatchers.IO) {
         val targetUrl = customUrl ?: defaultUpdateServerUrl
@@ -38,26 +39,99 @@ class AppUpdateManager(private val context: Context) {
         }
 
         try {
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                return@withContext null
-            }
-
-            val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
-            val json = JSONObject(jsonText)
-
-            val parsedInfo = parseReleaseJson(json) ?: return@withContext null
-
-            if (parsedInfo.versionCode > currentVersionCode) {
-                parsedInfo
-            } else {
-                null
+            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                val jsonText = connection.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(jsonText)
+                val parsedInfo = parseReleaseJson(json)
+                if (parsedInfo != null) {
+                    val isNewerVersionName = isVersionNewer(parsedInfo.versionName, currentVersionName)
+                    val isNewerVersionCode = parsedInfo.versionCode > currentVersionCode
+                    if (isNewerVersionCode || isNewerVersionName) {
+                        return@withContext parsedInfo
+                    }
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            null
         } finally {
             connection.disconnect()
         }
+
+        // Fallback: If GitHub API fails or is rate-limited (HTTP 403 / 429), check GitHub web release redirect
+        checkWebReleaseFallback(currentVersionCode, currentVersionName)
+    }
+
+    /**
+     * Web fallback for checking latest release directly from GitHub web UI redirect without API rate-limit.
+     */
+    private suspend fun checkWebReleaseFallback(
+        currentVersionCode: Int,
+        currentVersionName: String
+    ): UpdateInfo? = withContext(Dispatchers.IO) {
+        val webUrl = "https://github.com/PMGEECODE/RemoConnect/releases/latest"
+        var redirectUrl = ""
+        try {
+            val connection = (URL(webUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                connectTimeout = 10000
+                readTimeout = 10000
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Android Mobile App)")
+            }
+            connection.connect()
+
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                responseCode == 307 || responseCode == 308) {
+                redirectUrl = connection.getHeaderField("Location") ?: ""
+            }
+            connection.disconnect()
+
+            if (redirectUrl.isNotBlank() && redirectUrl.contains("/releases/tag/")) {
+                val tagName = redirectUrl.substringAfter("/releases/tag/").trim()
+                val cleanVersionName = tagName.removePrefix("v").removePrefix("V").trim()
+
+                if (isVersionNewer(cleanVersionName, currentVersionName)) {
+                    // Find actual APK filename on the release expanded_assets page
+                    var apkUrl = ""
+                    try {
+                        val assetsUrl = "https://github.com/PMGEECODE/RemoConnect/releases/expanded_assets/$tagName"
+                        val assetsConn = (URL(assetsUrl).openConnection() as HttpURLConnection).apply {
+                            requestMethod = "GET"
+                            connectTimeout = 10000
+                            readTimeout = 10000
+                            setRequestProperty("User-Agent", "Mozilla/5.0")
+                        }
+                        if (assetsConn.responseCode == HttpURLConnection.HTTP_OK) {
+                            val html = assetsConn.inputStream.bufferedReader().use { it.readText() }
+                            val apkRegex = Regex("""href="(/PMGEECODE/RemoConnect/releases/download/[^"]+\.apk)"""", RegexOption.IGNORE_CASE)
+                            val match = apkRegex.find(html)
+                            if (match != null) {
+                                apkUrl = "https://github.com" + match.groupValues[1]
+                            }
+                        }
+                        assetsConn.disconnect()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+
+                    if (apkUrl.isEmpty()) {
+                        apkUrl = "https://github.com/PMGEECODE/RemoConnect/releases/download/$tagName/RemoConnect.apk"
+                    }
+
+                    return@withContext UpdateInfo(
+                        versionName = cleanVersionName,
+                        versionCode = parseVersionCodeFromName(cleanVersionName),
+                        releaseNotes = "New release $tagName available on GitHub.",
+                        downloadUrl = apkUrl
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        null
     }
 
     /**
@@ -66,7 +140,7 @@ class AppUpdateManager(private val context: Context) {
     private fun parseReleaseJson(json: JSONObject): UpdateInfo? {
         // Option A: Custom JSON format
         if (json.has("versionCode")) {
-            val versionName = json.optString("versionName", "1.0")
+            val versionName = json.optString("versionName", "1.0.0")
             val versionCode = json.optInt("versionCode", 1)
             val releaseNotes = json.optString("releaseNotes", "")
             val downloadUrl = json.optString("downloadUrl", "")
@@ -86,9 +160,8 @@ class AppUpdateManager(private val context: Context) {
             val releaseNotes = json.optString("body", "")
             val publishedAt = json.optString("published_at", "")
 
-            // Extract numeric version code from tag name (e.g., "v1.2" -> 2 or "v1.0.3" -> 3)
-            val cleanVersionName = tagName.removePrefix("v").trim()
-            val parsedVersionCode = parseVersionCodeFromName(cleanVersionName)
+            val cleanVersionName = tagName.removePrefix("v").removePrefix("V").trim()
+            val parsedVersionCode = parseVersionCodeFromName(cleanVersionName, releaseNotes)
 
             // Look for .apk asset
             var apkDownloadUrl = ""
@@ -116,7 +189,15 @@ class AppUpdateManager(private val context: Context) {
         return null
     }
 
-    private fun parseVersionCodeFromName(versionName: String): Int {
+    private fun parseVersionCodeFromName(versionName: String, body: String = ""): Int {
+        // Check if release body contains explicit versionCode tag (e.g. "versionCode: 2")
+        val codeRegex = Regex("""versionCode[:=]\s*(\d+)""", RegexOption.IGNORE_CASE)
+        val match = codeRegex.find(body)
+        if (match != null) {
+            val code = match.groupValues[1].toIntOrNull()
+            if (code != null) return code
+        }
+
         val parts = versionName.split(".")
         return try {
             if (parts.size >= 2) {
@@ -130,6 +211,20 @@ class AppUpdateManager(private val context: Context) {
         } catch (e: Exception) {
             1
         }
+    }
+
+    private fun isVersionNewer(remoteVersion: String, currentVersion: String): Boolean {
+        val remoteParts = remoteVersion.split(".").mapNotNull { it.toIntOrNull() }
+        val currentParts = currentVersion.split(".").mapNotNull { it.toIntOrNull() }
+
+        val maxLength = maxOf(remoteParts.size, currentParts.size)
+        for (i in 0 until maxLength) {
+            val remoteVal = remoteParts.getOrElse(i) { 0 }
+            val currentVal = currentParts.getOrElse(i) { 0 }
+            if (remoteVal > currentVal) return true
+            if (remoteVal < currentVal) return false
+        }
+        return false
     }
 
     /**

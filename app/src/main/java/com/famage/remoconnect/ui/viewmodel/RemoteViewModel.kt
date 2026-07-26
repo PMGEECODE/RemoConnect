@@ -9,6 +9,9 @@ import com.famage.remoconnect.data.repository.TvDeviceRepository
 import com.famage.remoconnect.data.updater.AppUpdateManager
 import com.famage.remoconnect.data.updater.UpdateInfo
 import com.famage.remoconnect.data.updater.UpdateState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,6 +75,7 @@ class RemoteViewModel(
     init {
         syncDiscoveredDevices()
         reconnectLastPairedDevice()
+        startLowEnergyAutoConnectRetryLoop()
     }
 
     fun selectTab(tab: AppTab) {
@@ -117,6 +121,50 @@ class RemoteViewModel(
                 }
             } finally {
                 _connectingDeviceIp.value = null
+            }
+        }
+    }
+
+    private fun startLowEnergyAutoConnectRetryLoop() {
+        viewModelScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                // Passive low-energy interval (e.g. check every 15 seconds when disconnected)
+                delay(15000L)
+
+                // CRITICAL RULE: If a device is connected, do NOT perform any retries or network activity!
+                if (activeDevice.value?.isConnected == true) {
+                    continue
+                }
+
+                // If user is currently connecting or pairing manually, skip background retry
+                if (_connectingDeviceIp.value != null || _showPairingDialog.value) {
+                    continue
+                }
+
+                val savedList = savedDevices.value
+                if (savedList.isEmpty()) {
+                    continue
+                }
+
+                val pairedDevices = savedList.filter { it.isPaired }
+                if (pairedDevices.isEmpty()) {
+                    continue
+                }
+
+                for (target in pairedDevices) {
+                    if (activeDevice.value?.isConnected == true) break
+
+                    try {
+                        repository.addLog("[AUTO-CONNECT] Background retry attempting connection to ${target.name} (${target.ipAddress})")
+                        val success = repository.connectToDevice(target)
+                        if (success && activeDevice.value?.isConnected == true) {
+                            repository.addLog("[AUTO-CONNECT] Connected to ${target.name}. Pausing background retry loop.")
+                            break
+                        }
+                    } catch (e: Exception) {
+                        // Non-blocking background catch
+                    }
+                }
             }
         }
     }
@@ -268,7 +316,7 @@ class RemoteViewModel(
         viewModelScope.launch {
             try {
                 val updateManager = AppUpdateManager(context)
-                val newInfo = updateManager.checkForUpdates(currentVersionCode, customUrl)
+                val newInfo = updateManager.checkForUpdates(currentVersionCode, currentVersionName, customUrl)
                 if (newInfo != null) {
                     _updateState.value = UpdateState.Available(newInfo)
                 } else {

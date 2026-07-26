@@ -44,7 +44,7 @@ fun DiscoveryScreen(
     val debugLogs by viewModel.debugLogs.collectAsState()
 
     var showManualDialog by remember { mutableStateOf(false) }
-    var showDebugConsole by remember { mutableStateOf(true) }
+    var showDebugConsole by remember { mutableStateOf(false) }
 
     val savedIps = remember(savedDevices) { savedDevices.map { it.ipAddress }.toSet() }
     val newDiscoveredDevices = remember(allDiscoveredDevices, savedIps) {

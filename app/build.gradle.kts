@@ -61,6 +61,15 @@ android {
     }
 }
 
+androidComponents {
+    onVariants { variant ->
+        val mainOutput = variant.outputs.singleOrNull()
+        if (variant.buildType == "release") {
+            mainOutput?.outputFileName?.set("RemoConnect.apk")
+        }
+    }
+}
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
